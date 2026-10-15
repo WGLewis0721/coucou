@@ -1,0 +1,67 @@
+name: Studigo P4 REA static Coucou audit
+
+on:
+  push:
+    branches:
+      - research/studigo-v2-p4-rea-coucou
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: REA static analysis of selected animation modules
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes rea-agents@latest analyze-javascript-application "$GITHUB_WORKSPACE/windows" \
+            --source-path package.json \
+            --source-path src/core/anim.ts \
+            --source-path src/core/layout.ts \
+            --source-path src/mochi/engine.ts \
+            --source-path src/mochi/greeting.ts \
+            --source-path src/mochi/minibots.ts \
+            --source-path src/mochi/outfits.ts \
+            --source-path src/mochi/wardrobe.ts \
+            --source-path src/island/fsm.ts \
+            --source-path src/island/island.ts \
+            --integrity-policy record-and-continue \
+            --json > "$RUNNER_TEMP/rea-evidence.json"
+      - name: Print bounded REA evidence summary
+        if: success()
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json,os
+          p=os.path.join(os.environ['RUNNER_TEMP'],'rea-evidence.json')
+          with open(p,encoding='utf-8') as f: data=json.load(f)
+          print('REA_EVIDENCE_BYTES',os.stat(p).st_size)
+          print('ROOT_KEYS',list(data)[:30] if isinstance(data,dict) else type(data).__name__)
+          for root in [data,data.get('normalized_result',{}) if isinstance(data,dict) else {},data.get('result',{}) if isinstance(data,dict) else {}]:
+              if not isinstance(root,dict): continue
+              for key in ('evidence_id','operation','statistics','source_selection','coverage','limitations','unknowns','application_graph','semantic_graph'):
+                  if key not in root: continue
+                  val=root[key]
+                  if isinstance(val,dict):
+                      print('SUMMARY',key,'keys',list(val.keys())[:30])
+                  elif isinstance(val,list):
+                      print('SUMMARY',key,'items',len(val),str(val[:2])[:900])
+                  else: print('SUMMARY',key,str(val)[:300])
+          PY
+      - name: Upload REA evidence
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: studigo-v2-p4-coucou-rea-evidence
+          path: ${{ runner.temp }}/rea-evidence.json
+          retention-days: 7
